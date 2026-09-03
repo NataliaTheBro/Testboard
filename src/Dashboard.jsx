@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, X, Check, ChevronRight, Compass, Flame, Pencil, Radar } from "lucide-react";
+import { Plus, Trash2, X, Check, ChevronRight, Compass, Flame, Pencil, Radar, TrendingUp } from "lucide-react";
 import { storage } from "./lib/storage";
 
 const PALETTE = ["#5B6E58", "#B9707B", "#C79A4B", "#5A7A8C", "#8A5A6B", "#6B6357"];
@@ -149,6 +149,64 @@ function streak(habit) {
   return s;
 }
 
+function startOfWeek(d) {
+  const t = new Date(d); t.setHours(0, 0, 0, 0);
+  t.setDate(t.getDate() - ((t.getDay() + 6) % 7));
+  return t;
+}
+function rateInRange(habit, start, end) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const cappedEnd = end > today ? today : end;
+  if (cappedEnd < start) return null;
+  const keys = new Set();
+  const cur = new Date(start);
+  while (cur <= cappedEnd) {
+    keys.add(periodKey(habit.freq, cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  if (!keys.size) return null;
+  const arr = [...keys];
+  const done = arr.filter(k => habit.logs[k]).length;
+  return done / arr.length;
+}
+function areaRateInRange(area, start, end) {
+  const rates = area.habits.map(h => rateInRange(h, start, end)).filter(r => r !== null);
+  if (!rates.length) return null;
+  return rates.reduce((s, r) => s + r, 0) / rates.length;
+}
+function overallRateInRange(areas, start, end) {
+  const rates = areas.flatMap(a => a.habits.map(h => rateInRange(h, start, end))).filter(r => r !== null);
+  if (!rates.length) return null;
+  return rates.reduce((s, r) => s + r, 0) / rates.length;
+}
+function weekRanges(n) {
+  const out = [];
+  const start0 = startOfWeek(new Date());
+  for (let i = n - 1; i >= 0; i--) {
+    const s = new Date(start0); s.setDate(s.getDate() - i * 7);
+    const e = new Date(s); e.setDate(e.getDate() + 6);
+    const wk = weekKey(s).split("-W")[1];
+    out.push({ start: s, end: e, label: `KW${wk}` });
+  }
+  return out;
+}
+function monthRanges(n) {
+  const out = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const s = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const e = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+    const label = s.toLocaleDateString("de-DE", { month: "short" });
+    out.push({ start: s, end: e, label });
+  }
+  return out;
+}
+function trendDelta(points) {
+  const valid = points.filter(p => p.value !== null);
+  if (valid.length < 2) return null;
+  return valid[valid.length - 1].value - valid[valid.length - 2].value;
+}
+
 function Ring({ pct, color, size = 64, stroke = 6, children }) {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r;
   return (
@@ -217,6 +275,38 @@ function LifeWheel({ scores, size = 320 }) {
   );
 }
 
+function TrendChart({ points, color = "#2B2A28", height = 120, showArea = true }) {
+  const width = Math.max(points.length * 44, 240);
+  const padY = 16;
+  const padX = 14;
+  const usableH = height - padY * 2;
+  const stepX = points.length > 1 ? (width - padX * 2) / (points.length - 1) : 0;
+  const xFor = i => padX + i * stepX;
+  const yFor = v => v === null ? null : padY + (1 - v) * usableH;
+  const withXY = points.map((p, i) => ({ ...p, x: xFor(i), y: yFor(p.value) }));
+  const valid = withXY.filter(p => p.y !== null);
+  const linePath = valid.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const areaPath = valid.length ? `${linePath} L${valid[valid.length - 1].x.toFixed(1)},${height - padY} L${valid[0].x.toFixed(1)},${height - padY} Z` : "";
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ display: "block" }}>
+      {[0, 0.25, 0.5, 0.75, 1].map(g => (
+        <line key={g} x1={0} x2={width} y1={padY + (1 - g) * usableH} y2={padY + (1 - g) * usableH} stroke="#E4E0D6" strokeWidth={1} />
+      ))}
+      {showArea && areaPath && <path d={areaPath} fill={color} opacity={0.08} />}
+      {linePath && <path d={linePath} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />}
+      {valid.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r={i === valid.length - 1 ? 4 : 2.5} fill={color}>
+          <title>{`${p.label}: ${Math.round(p.value * 100)}%`}</title>
+        </circle>
+      ))}
+      {withXY.map((p, i) => (
+        <text key={i} x={p.x} y={height - 2} textAnchor="middle" style={{ font: "500 8px 'IBM Plex Mono', monospace", fill: "#9B9484" }}>{p.label}</text>
+      ))}
+    </svg>
+  );
+}
+
 function mergeAreas(stored, defaults) {
   const byId = new Map(stored.map(a => [a.id, a]));
   const merged = stored.map(a => ({...a}));
@@ -237,6 +327,7 @@ export default function Dashboard() {
   const [areas, setAreas] = useState(null);
   const [wheel, setWheel] = useState(null);
   const [tab, setTab] = useState("uebersicht");
+  const [trendRange, setTrendRange] = useState("week");
   const [activeArea, setActiveArea] = useState(null);
   const [editingArea, setEditingArea] = useState(null);
   const [addingHabitTo, setAddingHabitTo] = useState(null);
@@ -399,7 +490,7 @@ export default function Dashboard() {
       </header>
 
       <nav className="px-6 max-w-4xl mx-auto flex gap-1 mb-6 border-b border-[#E4E0D6]">
-        {[["uebersicht","Übersicht"],["checkin","Check-in"],["rad","Lebensrad"]].map(([k,l]) => (
+        {[["uebersicht","Übersicht"],["checkin","Check-in"],["rad","Lebensrad"],["verlauf","Verlauf"]].map(([k,l]) => (
           <button key={k} onClick={() => { setTab(k); }}
             className={`px-3 py-2 text-sm transition-colors ${tab===k ? "text-[#2B2A28] border-b-2 border-[#2B2A28] font-medium" : "text-[#9B9484] hover:text-[#6B6357]"}`}>
             {l}
@@ -538,6 +629,82 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {tab === "verlauf" && (() => {
+          const ranges = trendRange === "week" ? weekRanges(8) : monthRanges(6);
+          const overallPoints = ranges.map(r => ({ label: r.label, value: overallRateInRange(areas, r.start, r.end) }));
+          const overallDelta = trendDelta(overallPoints);
+          const areaSeries = areas.map(a => ({
+            area: a,
+            points: ranges.map(r => ({ label: r.label, value: areaRateInRange(a, r.start, r.end) })),
+          }));
+          return (
+            <div>
+              <div className="flex items-center gap-2 text-[#6B6357] mono text-xs uppercase tracking-wider mb-1">
+                <TrendingUp size={14} /> Verlauf
+              </div>
+              <p className="text-sm text-[#6B6357] mb-4">Vergleiche deine Wochen und Monate – wo hast du Fortschritte gemacht?</p>
+
+              <div className="flex gap-1.5 mb-4">
+                {[["week","Wochenansicht"],["month","Monatsansicht"]].map(([k,l]) => (
+                  <button key={k} onClick={() => setTrendRange(k)}
+                    className={`px-3 py-1.5 rounded-full text-xs mono transition-colors ${trendRange===k ? "bg-[#2B2A28] text-white" : "bg-[#F2F1EC] text-[#6B6357]"}`}>{l}</button>
+                ))}
+              </div>
+
+              <div className="bg-white rounded-2xl border border-[#E4E0D6] p-6 mb-4">
+                <div className="flex items-baseline justify-between mb-3 gap-2 flex-wrap">
+                  <div>
+                    <div className="serif text-lg" style={{ fontWeight: 600 }}>Gesamtfortschritt</div>
+                    <div className="mono text-xs text-[#9B9484]">{trendRange === "week" ? "letzte 8 Wochen" : "letzte 6 Monate"}</div>
+                  </div>
+                  {overallDelta !== null && Math.round(overallDelta * 100) !== 0 && (
+                    <span className="mono text-xs px-2 py-1 rounded-full"
+                      style={{ background: overallDelta >= 0 ? "rgba(91,110,88,0.14)" : "rgba(185,112,123,0.14)", color: overallDelta >= 0 ? "#5B6E58" : "#B9707B" }}>
+                      {overallDelta >= 0 ? "+" : ""}{Math.round(overallDelta * 100)}% ggü. {trendRange === "week" ? "Vorwoche" : "Vormonat"}
+                    </span>
+                  )}
+                </div>
+                {overallPoints.some(p => p.value !== null) ? (
+                  <TrendChart points={overallPoints} color="#2B2A28" height={140} />
+                ) : (
+                  <p className="text-sm text-[#9B9484]">Noch keine Daten für diesen Zeitraum.</p>
+                )}
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                {areaSeries.map(({ area: a, points }) => {
+                  const d = trendDelta(points);
+                  const last = [...points].reverse().find(p => p.value !== null);
+                  const hasData = points.some(p => p.value !== null);
+                  return (
+                    <div key={a.id} className="bg-white rounded-xl border border-[#E4E0D6] p-4">
+                      <div className="flex items-center justify-between mb-1 gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: a.color }} />
+                          <span className="text-sm font-medium truncate">{a.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {last && <span className="mono text-xs text-[#6B6357]">{Math.round(last.value * 100)}%</span>}
+                          {d !== null && Math.round(d * 100) !== 0 && (
+                            <span className="mono text-[10px]" style={{ color: d >= 0 ? "#5B6E58" : "#B9707B" }}>
+                              {d >= 0 ? "▲" : "▼"}{Math.abs(Math.round(d * 100))}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {hasData ? (
+                        <TrendChart points={points} color={a.color} height={64} showArea={false} />
+                      ) : (
+                        <p className="text-xs text-[#9B9484] py-2">Noch keine Daten.</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {tab === "bereich" && area && (
           <div>
