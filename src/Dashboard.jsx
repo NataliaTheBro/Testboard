@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, X, Check, ChevronRight, Compass, Flame, Pencil, Radar, TrendingUp } from "lucide-react";
+import { Plus, Trash2, X, Check, ChevronRight, Compass, Flame, Pencil, Radar, TrendingUp, CalendarDays, MapPin, ExternalLink } from "lucide-react";
 import { storage } from "./lib/storage";
 
 const PALETTE = ["#5B6E58", "#B9707B", "#C79A4B", "#5A7A8C", "#8A5A6B", "#6B6357"];
@@ -201,6 +201,12 @@ function monthRanges(n) {
   }
   return out;
 }
+function formatEventDate(iso) {
+  if (!iso) return "";
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+}
 function trendDelta(points) {
   const valid = points.filter(p => p.value !== null);
   if (valid.length < 2) return null;
@@ -328,6 +334,7 @@ export default function Dashboard() {
   const [wheel, setWheel] = useState(null);
   const [tab, setTab] = useState("uebersicht");
   const [trendRange, setTrendRange] = useState("week");
+  const [events, setEvents] = useState(undefined);
   const [activeArea, setActiveArea] = useState(null);
   const [editingArea, setEditingArea] = useState(null);
   const [addingHabitTo, setAddingHabitTo] = useState(null);
@@ -359,6 +366,13 @@ export default function Dashboard() {
       } catch { setWheel({ scores: WHEEL_DEFAULT, notes: WHEEL_NOTES_DEFAULT }); }
       wheelLoaded.current = true;
     })();
+  }, []);
+
+  useEffect(() => {
+    fetch(`${import.meta.env.BASE_URL}events.json`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setEvents(data))
+      .catch(() => setEvents(null));
   }, []);
 
   useEffect(() => {
@@ -490,7 +504,7 @@ export default function Dashboard() {
       </header>
 
       <nav className="px-6 max-w-4xl mx-auto flex gap-1 mb-6 border-b border-[#E4E0D6]">
-        {[["uebersicht","Übersicht"],["checkin","Check-in"],["rad","Lebensrad"],["verlauf","Verlauf"]].map(([k,l]) => (
+        {[["uebersicht","Übersicht"],["checkin","Check-in"],["rad","Lebensrad"],["verlauf","Verlauf"],["events","Events"]].map(([k,l]) => (
           <button key={k} onClick={() => { setTab(k); }}
             className={`px-3 py-2 text-sm transition-colors ${tab===k ? "text-[#2B2A28] border-b-2 border-[#2B2A28] font-medium" : "text-[#9B9484] hover:text-[#6B6357]"}`}>
             {l}
@@ -702,6 +716,52 @@ export default function Dashboard() {
                   );
                 })}
               </div>
+            </div>
+          );
+        })()}
+
+        {tab === "events" && (() => {
+          const list = events?.events ? [...events.events].sort((a, b) => `${a.date} ${a.time||""}`.localeCompare(`${b.date} ${b.time||""}`)) : [];
+          return (
+            <div>
+              <div className="flex items-center gap-2 text-[#6B6357] mono text-xs uppercase tracking-wider mb-1">
+                <CalendarDays size={14} /> Events
+              </div>
+              <p className="text-sm text-[#6B6357] mb-4">
+                Veranstaltungen & Lauftreffs in Köln für die kommende Woche{events?.weekLabel ? ` (${events.weekLabel})` : ""}.
+              </p>
+              {events === undefined && <p className="text-sm text-[#9B9484]">Lädt …</p>}
+              {events !== undefined && !list.length && (
+                <p className="text-sm text-[#9B9484]">Noch keine Events geladen. Die Liste wird wöchentlich automatisch aktualisiert.</p>
+              )}
+              {list.length > 0 && (
+                <div className="space-y-2">
+                  {list.map((e, i) => (
+                    <div key={i} className="bg-white rounded-xl border border-[#E4E0D6] px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium">{e.title}</div>
+                          <div className="mono text-[11px] text-[#9B9484] mt-0.5 flex items-center gap-2 flex-wrap">
+                            <span>{formatEventDate(e.date)}{e.endDate ? `–${formatEventDate(e.endDate)}` : ""}{e.time ? ` · ${e.time}` : ""}</span>
+                            {e.venue && <span className="flex items-center gap-1"><MapPin size={11}/>{e.venue}</span>}
+                          </div>
+                        </div>
+                        {e.category && (
+                          <span className="text-[10px] mono px-2 py-1 rounded-full shrink-0" style={{ background: "#F2F1EC", color: "#6B6357" }}>{e.category}</span>
+                        )}
+                      </div>
+                      {e.url && (
+                        <a href={e.url} target="_blank" rel="noopener noreferrer" className="text-xs text-[#5A7A8C] hover:underline flex items-center gap-1 mt-1.5 w-fit">
+                          Details <ExternalLink size={11}/>
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {events?.updated && (
+                <p className="mono text-[10px] text-[#9B9484] mt-4">Zuletzt aktualisiert: {events.updated}</p>
+              )}
             </div>
           );
         })()}

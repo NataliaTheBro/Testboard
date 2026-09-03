@@ -1,0 +1,35 @@
+{
+  "updated": "2026-09-03",
+  "weekLabel": "7.–13. September 2026",
+  "events": [
+    {
+      "title": "SHALOM-MUSIK.KOELN Festival (Abschlusswoche)",
+      "date": "2026-09-07",
+      "endDate": "2026-09-10",
+      "venue": "über 25 Orte in Köln",
+      "category": "Festival",
+      "url": "https://www.stadt-koeln.de/politik-und-verwaltung/presseservice/kulturtermine-des-monats-september-2026"
+    },
+    {
+      "title": "NDO Run Club – Mittwochslauf",
+      "date": "2026-09-09",
+      "venue": "Köln (Treffpunkt siehe Social Media)",
+      "category": "Lauftreff",
+      "url": "https://coziness.eu/en/collections/ndo-run-club"
+    },
+    {
+      "title": "Kunstinstallation KEYENBERG 3",
+      "date": "2026-09-10",
+      "time": "13:00–16:00",
+      "venue": "Kalker Laden, Stadtpark Kalk",
+      "category": "Kunst"
+    },
+    {
+      "title": "NDO Run Club – Sonntagslauf",
+      "date": "2026-09-13",
+      "venue": "Köln (Treffpunkt siehe Social Media)",
+      "category": "Lauftreff",
+      "url": "https://coziness.eu/en/collections/ndo-run-club"
+    }
+  ]
+}
