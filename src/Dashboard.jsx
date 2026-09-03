@@ -17,6 +17,9 @@ const WHEEL_CATEGORIES = [
   { key: "spirit", label: "Spirit", color: "#8062AA" },
 ];
 const WHEEL_DEFAULT = Object.fromEntries(WHEEL_CATEGORIES.map(c => [c.key, 5]));
+const WHEEL_NOTES_DEFAULT = Object.fromEntries(WHEEL_CATEGORIES.map(c => [c.key, ""]));
+const WHEEL_LOW_SUGGESTIONS = ["Keine Zeit", "Fehlender Fokus", "Andere Prioritäten", "Zu wenig Energie", "Vermeidung", "Fehlende Unterstützung", "Unklares Ziel", "Äußere Umstände"];
+const WHEEL_HIGH_SUGGESTIONS = ["Gute Routine etabliert", "Klare Priorität", "Unterstützung von anderen", "Kürzlich Fortschritt gemacht", "Bewusste Entscheidung", "Genug Zeit investiert", "Klares Ziel vor Augen"];
 
 const DEFAULT_AREAS = [
   { id: "a1", name: "Morgenroutine", color: PALETTE[0], vision: "Ich starte in den Tag statt in den Tag hinein gezogen zu werden.", habits: [
@@ -253,9 +256,16 @@ export default function Dashboard() {
     (async () => {
       try {
         const res = await storage.get("lebens-rad-scores", false);
-        if (res && res.value) setWheel({ ...WHEEL_DEFAULT, ...JSON.parse(res.value) });
-        else setWheel(WHEEL_DEFAULT);
-      } catch { setWheel(WHEEL_DEFAULT); }
+        const parsed = res && res.value ? JSON.parse(res.value) : null;
+        if (parsed && parsed.scores) {
+          setWheel({ scores: { ...WHEEL_DEFAULT, ...parsed.scores }, notes: { ...WHEEL_NOTES_DEFAULT, ...(parsed.notes || {}) } });
+        } else if (parsed) {
+          // legacy format: flat { key: score }
+          setWheel({ scores: { ...WHEEL_DEFAULT, ...parsed }, notes: WHEEL_NOTES_DEFAULT });
+        } else {
+          setWheel({ scores: WHEEL_DEFAULT, notes: WHEEL_NOTES_DEFAULT });
+        }
+      } catch { setWheel({ scores: WHEEL_DEFAULT, notes: WHEEL_NOTES_DEFAULT }); }
       wheelLoaded.current = true;
     })();
   }, []);
@@ -332,7 +342,37 @@ export default function Dashboard() {
     setAreas(prev => prev.filter(a => a.id !== id));
     if (activeArea === id) { setActiveArea(null); setTab("uebersicht"); }
   };
-  const setWheelScore = (key, value) => setWheel(prev => ({ ...prev, [key]: value }));
+  const setWheelScore = (key, value) => setWheel(prev => ({ ...prev, scores: { ...prev.scores, [key]: value } }));
+  const setWheelNote = (key, text) => setWheel(prev => ({ ...prev, notes: { ...prev.notes, [key]: text } }));
+  const toggleWheelSuggestion = (key, phrase) => {
+    setWheel(prev => {
+      const parts = (prev.notes[key] || "").split(",").map(s => s.trim()).filter(Boolean);
+      const idx = parts.indexOf(phrase);
+      if (idx >= 0) parts.splice(idx, 1); else parts.push(phrase);
+      return { ...prev, notes: { ...prev.notes, [key]: parts.join(", ") } };
+    });
+  };
+
+  const addGoal = (areaId) => {
+    const goal = { id: "g" + Date.now(), title: "Neues Ziel", why: "", milestones: [] };
+    updateArea(areaId, a => ({ ...a, goals: [...(a.goals || []), goal] }));
+  };
+  const updateGoal = (areaId, goalId, fn) => {
+    updateArea(areaId, a => ({ ...a, goals: (a.goals || []).map(g => g.id === goalId ? fn(g) : g) }));
+  };
+  const removeGoal = (areaId, goalId) => {
+    updateArea(areaId, a => ({ ...a, goals: (a.goals || []).filter(g => g.id !== goalId) }));
+  };
+  const addMilestone = (areaId, goalId, text) => {
+    if (!text.trim()) return;
+    updateGoal(areaId, goalId, g => ({ ...g, milestones: [...g.milestones, { id: "m" + Date.now(), text: text.trim(), done: false }] }));
+  };
+  const toggleMilestone = (areaId, goalId, milestoneId) => {
+    updateGoal(areaId, goalId, g => ({ ...g, milestones: g.milestones.map(m => m.id === milestoneId ? { ...m, done: !m.done } : m) }));
+  };
+  const removeMilestone = (areaId, goalId, milestoneId) => {
+    updateGoal(areaId, goalId, g => ({ ...g, milestones: g.milestones.filter(m => m.id !== milestoneId) }));
+  };
 
   const area = areas.find(a => a.id === activeArea);
 
@@ -459,19 +499,42 @@ export default function Dashboard() {
             </div>
             <p className="text-sm text-[#6B6357] mb-6">Wie ausgeglichen fühlt sich dein Leben gerade an? Bewerte jeden Bereich von 0 bis 10.</p>
             <div className="bg-white rounded-2xl border border-[#E4E0D6] p-6 mb-4">
-              <LifeWheel scores={wheel} />
+              <LifeWheel scores={wheel.scores} />
             </div>
-            <div className="grid sm:grid-cols-2 gap-2">
-              {WHEEL_CATEGORIES.map(c => (
-                <div key={c.key} className="flex items-center gap-3 bg-white rounded-xl border border-[#E4E0D6] px-4 py-3">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c.color }} />
-                  <span className="text-sm flex-1">{c.label}</span>
-                  <input type="range" min={0} max={10} step={1} value={wheel[c.key] ?? 5}
-                    onChange={e => setWheelScore(c.key, Number(e.target.value))}
-                    style={{ accentColor: c.color }} className="w-28" />
-                  <span className="mono text-xs text-[#6B6357] w-5 text-right">{wheel[c.key] ?? 5}</span>
-                </div>
-              ))}
+            <div className="space-y-3">
+              {WHEEL_CATEGORIES.map(c => {
+                const score = wheel.scores[c.key] ?? 5;
+                const note = wheel.notes[c.key] || "";
+                const selected = note.split(",").map(s => s.trim()).filter(Boolean);
+                const suggestions = score < 5 ? WHEEL_LOW_SUGGESTIONS : score > 5 ? WHEEL_HIGH_SUGGESTIONS : null;
+                return (
+                  <div key={c.key} className="bg-white rounded-xl border border-[#E4E0D6] p-4">
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c.color }} />
+                      <span className="text-sm flex-1 font-medium">{c.label}</span>
+                      <input type="range" min={0} max={10} step={1} value={score}
+                        onChange={e => setWheelScore(c.key, Number(e.target.value))}
+                        style={{ accentColor: c.color }} className="w-28" />
+                      <span className="mono text-xs text-[#6B6357] w-5 text-right">{score}</span>
+                    </div>
+                    {suggestions && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {suggestions.map(s => (
+                          <button key={s} onClick={() => toggleWheelSuggestion(c.key, s)}
+                            className="px-2 py-1 rounded-full text-xs transition-colors"
+                            style={selected.includes(s) ? { background: c.color, color: "white" } : { background: "#F2F1EC", color: "#6B6357" }}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <textarea value={note} onChange={e => setWheelNote(c.key, e.target.value)}
+                      placeholder={score === 5 ? "Was beeinflusst diesen Bereich?" : score < 5 ? "Warum weniger als 5?" : "Warum mehr als 5?"}
+                      rows={1}
+                      className="w-full text-sm bg-[#F7F5F0] rounded-lg p-2 border border-[#E4E0D6] focus:outline-none focus:border-[#9B9484] resize-none" />
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -543,9 +606,88 @@ export default function Dashboard() {
             </div>
 
             {addingHabitTo === area.id && <AddHabitForm onAdd={(name,freq,time) => addHabit(area.id,name,freq,time)} onCancel={() => setAddingHabitTo(null)} />}
+
+            <div className="flex items-center justify-between mb-2 mt-6">
+              <span className="mono text-xs uppercase tracking-wider text-[#9B9484]">Ziele</span>
+              <button onClick={() => addGoal(area.id)} className="text-sm text-[#6B6357] hover:text-[#2B2A28] flex items-center gap-1">
+                <Plus size={14}/> Ziel hinzufügen
+              </button>
+            </div>
+            <div className="space-y-3">
+              {(area.goals || []).map(g => (
+                <GoalCard key={g.id} goal={g} color={area.color}
+                  onUpdate={fn => updateGoal(area.id, g.id, fn)}
+                  onRemove={() => removeGoal(area.id, g.id)}
+                  onAddMilestone={text => addMilestone(area.id, g.id, text)}
+                  onToggleMilestone={mid => toggleMilestone(area.id, g.id, mid)}
+                  onRemoveMilestone={mid => removeMilestone(area.id, g.id, mid)}
+                />
+              ))}
+              {!(area.goals || []).length && <p className="text-sm text-[#9B9484]">Noch keine Ziele.</p>}
+            </div>
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function GoalCard({ goal, color, onUpdate, onRemove, onAddMilestone, onToggleMilestone, onRemoveMilestone }) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [newMilestone, setNewMilestone] = useState("");
+  const pct = goal.milestones.length ? goal.milestones.filter(m => m.done).length / goal.milestones.length : 0;
+  const submitMilestone = () => {
+    if (!newMilestone.trim()) return;
+    onAddMilestone(newMilestone);
+    setNewMilestone("");
+  };
+  return (
+    <div className="bg-white rounded-xl border border-[#E4E0D6] p-4">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        {editingTitle ? (
+          <input autoFocus value={goal.title} onChange={e => onUpdate(g => ({ ...g, title: e.target.value }))}
+            onBlur={() => setEditingTitle(false)} onKeyDown={e => e.key === "Enter" && setEditingTitle(false)}
+            className="text-sm font-medium bg-transparent border-b border-[#C9C3B4] focus:outline-none flex-1" />
+        ) : (
+          <button onClick={() => setEditingTitle(true)} className="text-sm font-medium text-left flex-1 flex items-center gap-1.5">
+            {goal.title} <Pencil size={12} className="text-[#C9C3B4]" />
+          </button>
+        )}
+        <button onClick={onRemove} className="text-[#C9C3B4] hover:text-[#B9707B] shrink-0"><Trash2 size={14}/></button>
+      </div>
+
+      <label className="mono text-[10px] uppercase tracking-wider text-[#9B9484]">Warum ist das wichtig?</label>
+      <textarea value={goal.why} onChange={e => onUpdate(g => ({ ...g, why: e.target.value }))}
+        placeholder="Wie verbindet sich dieses Ziel mit dem großen Ganzen?" rows={2}
+        className="w-full mt-1 mb-3 text-sm bg-[#F7F5F0] rounded-lg p-2.5 border border-[#E4E0D6] focus:outline-none focus:border-[#9B9484] resize-none" />
+
+      {goal.milestones.length > 0 && (
+        <div className="mb-2">
+          <div className="h-1.5 bg-[#F2F1EC] rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all" style={{ width: `${pct * 100}%`, background: color }} />
+          </div>
+          <div className="mono text-[10px] text-[#9B9484] mt-1">{Math.round(pct * 100)}% · {goal.milestones.filter(m => m.done).length}/{goal.milestones.length} Meilensteine</div>
+        </div>
+      )}
+
+      <div className="space-y-1.5 mb-2">
+        {goal.milestones.map(m => (
+          <div key={m.id} className="flex items-center gap-2">
+            <button onClick={() => onToggleMilestone(m.id)}
+              className="w-4 h-4 rounded border flex items-center justify-center shrink-0"
+              style={{ borderColor: color, background: m.done ? color : "transparent" }}>
+              {m.done && <Check size={10} color="white" />}
+            </button>
+            <span className="text-sm flex-1" style={{ textDecoration: m.done ? "line-through" : "none", opacity: m.done ? 0.6 : 1 }}>{m.text}</span>
+            <button onClick={() => onRemoveMilestone(m.id)} className="text-[#C9C3B4] hover:text-[#B9707B] shrink-0"><X size={13}/></button>
+          </div>
+        ))}
+      </div>
+      <input value={newMilestone} onChange={e => setNewMilestone(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && submitMilestone()}
+        onBlur={submitMilestone}
+        placeholder="Meilenstein hinzufügen…"
+        className="w-full text-sm bg-[#F7F5F0] rounded-lg px-2.5 py-1.5 border border-[#E4E0D6] focus:outline-none focus:border-[#9B9484]" />
     </div>
   );
 }
