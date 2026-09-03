@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, X, Check, ChevronRight, Compass, Flame, Pencil, Radar, TrendingUp, CalendarDays, MapPin, ExternalLink } from "lucide-react";
+import { Plus, Trash2, X, Check, ChevronRight, Compass, Flame, Pencil, Radar, TrendingUp, CalendarDays, MapPin, ExternalLink, Activity } from "lucide-react";
 import { storage } from "./lib/storage";
 
 const PALETTE = ["#5B6E58", "#B9707B", "#C79A4B", "#5A7A8C", "#8A5A6B", "#6B6357"];
@@ -795,6 +795,13 @@ export default function Dashboard() {
                 className="w-full mt-1 text-sm bg-[#F7F5F0] rounded-lg p-3 border border-[#E4E0D6] focus:outline-none focus:border-[#9B9484] resize-none" />
             </div>
 
+            {area.habits.some(h => h.type === "number") && (
+              <OuraSyncPanel onSync={(data) => {
+                const target = area.habits.find(h => h.type === "number");
+                if (target && data.readiness_score != null) setNumberLog(area.id, target.id, data.readiness_score);
+              }} />
+            )}
+
             <div className="flex items-center justify-between mb-2">
               <span className="mono text-xs uppercase tracking-wider text-[#9B9484]">Gewohnheiten</span>
               <button onClick={() => setAddingHabitTo(area.id)} className="text-sm text-[#6B6357] hover:text-[#2B2A28] flex items-center gap-1">
@@ -915,6 +922,92 @@ function GoalCard({ goal, color, onUpdate, onRemove, onAddMilestone, onToggleMil
         onBlur={submitMilestone}
         placeholder="Meilenstein hinzufügen…"
         className="w-full text-sm bg-[#F7F5F0] rounded-lg px-2.5 py-1.5 border border-[#E4E0D6] focus:outline-none focus:border-[#9B9484]" />
+    </div>
+  );
+}
+
+function OuraSyncPanel({ onSync }) {
+  const [config, setConfig] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const [status, setStatus] = useState("idle");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await storage.get("oura-worker-config", false);
+        setConfig(res && res.value ? JSON.parse(res.value) : { workerUrl: "", apiKey: "" });
+      } catch {
+        setConfig({ workerUrl: "", apiKey: "" });
+      }
+    })();
+  }, []);
+
+  const saveConfig = (next) => {
+    setConfig(next);
+    storage.set("oura-worker-config", JSON.stringify(next), false).catch(() => {});
+  };
+
+  const sync = async () => {
+    if (!config || !config.workerUrl.trim()) {
+      setStatus("error");
+      setMessage("Bitte zuerst die Worker-URL eintragen.");
+      setExpanded(true);
+      return;
+    }
+    setStatus("syncing");
+    setMessage("");
+    try {
+      const base = config.workerUrl.trim().replace(/\/$/, "");
+      const res = await fetch(`${base}/api/readiness`, {
+        headers: config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const known = {
+          not_connected: "Noch nicht mit Oura verbunden – einmalig /login im Worker im Browser öffnen.",
+          unauthorized: "API-Key stimmt nicht mit dem Worker überein.",
+          refresh_failed: "Token-Erneuerung fehlgeschlagen – eventuell erneut über /login verbinden.",
+        };
+        setStatus("error");
+        setMessage((data && known[data.error]) || `Fehler vom Worker (${res.status}).`);
+        return;
+      }
+      onSync(data);
+      setStatus("success");
+      setMessage(`Readiness ${data.readiness_score ?? "–"} · Schlaf ${data.sleep_score ?? "–"} (${data.date})`);
+    } catch {
+      setStatus("error");
+      setMessage("Worker nicht erreichbar. URL korrekt?");
+    }
+  };
+
+  if (!config) return null;
+
+  return (
+    <div className="bg-white rounded-xl border border-[#E4E0D6] p-4 mb-4">
+      <button onClick={() => setExpanded(x => !x)} className="flex items-center justify-between w-full text-left">
+        <span className="text-sm font-medium flex items-center gap-2"><Activity size={14}/> Oura-Sync</span>
+        <ChevronRight size={14} className="text-[#C9C3B4] shrink-0" style={{ transform: expanded ? "rotate(90deg)" : "none", transition: "transform .15s" }}/>
+      </button>
+      {expanded && (
+        <div className="mt-3 space-y-2">
+          <input value={config.workerUrl} onChange={e => saveConfig({ ...config, workerUrl: e.target.value })}
+            placeholder="Worker-URL, z. B. https://oura-bridge.deinname.workers.dev"
+            className="w-full text-sm bg-[#F7F5F0] rounded-lg p-2 border border-[#E4E0D6] focus:outline-none focus:border-[#9B9484]" />
+          <input value={config.apiKey} onChange={e => saveConfig({ ...config, apiKey: e.target.value })} type="password"
+            placeholder="API-Key (DASHBOARD_API_KEY)"
+            className="w-full text-sm bg-[#F7F5F0] rounded-lg p-2 border border-[#E4E0D6] focus:outline-none focus:border-[#9B9484]" />
+          <p className="text-[11px] text-[#9B9484]">Bleibt nur in diesem Browser gespeichert, landet nie im Repo.</p>
+        </div>
+      )}
+      <div className="flex items-center gap-3 mt-3 flex-wrap">
+        <button onClick={sync} disabled={status === "syncing"}
+          className="px-3 py-1.5 rounded-lg bg-[#2B2A28] text-white text-sm disabled:opacity-50">
+          {status === "syncing" ? "Synchronisiert…" : "Jetzt synchronisieren"}
+        </button>
+        {message && <span className="text-xs" style={{ color: status === "error" ? "#B9707B" : "#5B6E58" }}>{message}</span>}
+      </div>
     </div>
   );
 }

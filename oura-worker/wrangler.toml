@@ -1,0 +1,20 @@
+name = "oura-bridge"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Fill in after `wrangler kv namespace create OURA_TOKENS`
+kv_namespaces = [
+  { binding = "OURA_TOKENS", id = "REPLACE_WITH_KV_NAMESPACE_ID" }
+]
+
+[vars]
+# Origin allowed to call /api/readiness. Adjust if you fork/rename the Pages site.
+ALLOWED_ORIGIN = "https://nataliathebro.github.io"
+# Must exactly match the redirect URI registered in your Oura app settings.
+# Replace <subdomain> with your actual workers.dev subdomain after the first deploy.
+OURA_REDIRECT_URI = "https://oura-bridge.<subdomain>.workers.dev/callback"
+
+# Set with `wrangler secret put <NAME>` - never put these in this file or commit them:
+#   OURA_CLIENT_ID
+#   OURA_CLIENT_SECRET
+#   DASHBOARD_API_KEY
