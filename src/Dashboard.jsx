@@ -1,8 +1,22 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, X, Check, ChevronRight, Compass, Flame, Pencil } from "lucide-react";
+import { Plus, Trash2, X, Check, ChevronRight, Compass, Flame, Pencil, Radar } from "lucide-react";
 import { storage } from "./lib/storage";
 
 const PALETTE = ["#5B6E58", "#B9707B", "#C79A4B", "#5A7A8C", "#8A5A6B", "#6B6357"];
+
+const WHEEL_CATEGORIES = [
+  { key: "health", label: "Health", color: "#C1547A" },
+  { key: "work", label: "Work", color: "#C1583F" },
+  { key: "family", label: "Family", color: "#C98A45" },
+  { key: "friends", label: "Friends", color: "#C7A93E" },
+  { key: "romance", label: "Romance", color: "#9AA84A" },
+  { key: "sex", label: "Sex", color: "#5B9463" },
+  { key: "creativity", label: "Creativity", color: "#4F9E93" },
+  { key: "learning", label: "Learning", color: "#4F84A8" },
+  { key: "finances", label: "Finances", color: "#5A6BAE" },
+  { key: "spirit", label: "Spirit", color: "#8062AA" },
+];
+const WHEEL_DEFAULT = Object.fromEntries(WHEEL_CATEGORIES.map(c => [c.key, 5]));
 
 const DEFAULT_AREAS = [
   { id: "a1", name: "Morgenroutine", color: PALETTE[0], vision: "Ich starte in den Tag statt in den Tag hinein gezogen zu werden.", habits: [
@@ -146,6 +160,60 @@ function Ring({ pct, color, size = 64, stroke = 6, children }) {
   );
 }
 
+function LifeWheel({ scores, size = 320 }) {
+  const cx = size / 2, cy = size / 2;
+  const R = size * 0.31;
+  const toXY = (angleDeg, r) => {
+    const rad = (angleDeg * Math.PI) / 180;
+    return [cx + r * Math.sin(rad), cy - r * Math.cos(rad)];
+  };
+  const points = WHEEL_CATEGORIES.map((c, i) => {
+    const angle = i * 36;
+    const val = scores[c.key] ?? 0;
+    const [x, y] = toXY(angle, (val / 10) * R);
+    return { ...c, angle, val, x, y };
+  });
+  const polygonPath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ") + " Z";
+  const avg = WHEEL_CATEGORIES.reduce((s, c) => s + (scores[c.key] ?? 0), 0) / WHEEL_CATEGORIES.length;
+
+  const margin = 60;
+  return (
+    <svg viewBox={`${-margin} ${-margin} ${size + margin * 2} ${size + margin * 2}`} width="100%" style={{ maxWidth: size, display: "block", margin: "0 auto" }}>
+      {[2, 4, 6, 8, 10].map(v => (
+        <circle key={v} cx={cx} cy={cy} r={(v / 10) * R} fill="none" stroke="#E4E0D6" strokeWidth={1} />
+      ))}
+      {WHEEL_CATEGORIES.map((c, i) => {
+        const [x, y] = toXY(i * 36, R);
+        return <line key={c.key} x1={cx} y1={cy} x2={x} y2={y} stroke="#E4E0D6" strokeWidth={1} />;
+      })}
+      {WHEEL_CATEGORIES.map((c, i) => {
+        const angle = i * 36;
+        const [xs, ys] = toXY(angle - 18, R + 14);
+        const [xe, ye] = toXY(angle + 18, R + 14);
+        return (
+          <path key={c.key} d={`M ${xs.toFixed(1)},${ys.toFixed(1)} A ${R + 14},${R + 14} 0 0 1 ${xe.toFixed(1)},${ye.toFixed(1)}`}
+            fill="none" stroke={c.color} strokeWidth={13} />
+        );
+      })}
+      <path d={polygonPath} fill="rgba(43,42,40,0.08)" stroke="#2B2A28" strokeWidth={1.5} strokeLinejoin="round" />
+      {points.map(p => (
+        <circle key={p.key} cx={p.x} cy={p.y} r={4} fill={p.color} stroke="#F2F1EC" strokeWidth={1.5} />
+      ))}
+      {WHEEL_CATEGORIES.map((c, i) => {
+        const [x, y] = toXY(i * 36, R + 38);
+        return (
+          <text key={c.key} x={x} y={y} textAnchor="middle" dominantBaseline="middle"
+            style={{ font: "600 10px 'IBM Plex Mono', monospace", fill: "#2B2A28", letterSpacing: "0.03em" }}>
+            {c.label.toUpperCase()}
+          </text>
+        );
+      })}
+      <text x={cx} y={cy - 6} textAnchor="middle" style={{ font: "600 22px 'Fraunces', serif", fill: "#2B2A28" }}>{avg.toFixed(1)}</text>
+      <text x={cx} y={cy + 12} textAnchor="middle" style={{ font: "500 9px 'IBM Plex Mono', monospace", fill: "#9B9484", letterSpacing: "0.06em" }}>DURCHSCHNITT</text>
+    </svg>
+  );
+}
+
 function mergeAreas(stored, defaults) {
   const byId = new Map(stored.map(a => [a.id, a]));
   const merged = stored.map(a => ({...a}));
@@ -164,12 +232,14 @@ function mergeAreas(stored, defaults) {
 
 export default function Dashboard() {
   const [areas, setAreas] = useState(null);
+  const [wheel, setWheel] = useState(null);
   const [tab, setTab] = useState("uebersicht");
   const [activeArea, setActiveArea] = useState(null);
   const [editingArea, setEditingArea] = useState(null);
   const [addingHabitTo, setAddingHabitTo] = useState(null);
   const [saveState, setSaveState] = useState("idle");
   const loaded = useRef(false);
+  const wheelLoaded = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -179,6 +249,14 @@ export default function Dashboard() {
         else setAreas(DEFAULT_AREAS);
       } catch { setAreas(DEFAULT_AREAS); }
       loaded.current = true;
+    })();
+    (async () => {
+      try {
+        const res = await storage.get("lebens-rad-scores", false);
+        if (res && res.value) setWheel({ ...WHEEL_DEFAULT, ...JSON.parse(res.value) });
+        else setWheel(WHEEL_DEFAULT);
+      } catch { setWheel(WHEEL_DEFAULT); }
+      wheelLoaded.current = true;
     })();
   }, []);
 
@@ -194,7 +272,19 @@ export default function Dashboard() {
     return () => clearTimeout(t);
   }, [areas]);
 
-  if (areas === null) {
+  useEffect(() => {
+    if (!wheelLoaded.current || wheel === null) return;
+    setSaveState("saving");
+    const t = setTimeout(async () => {
+      try {
+        await storage.set("lebens-rad-scores", JSON.stringify(wheel), false);
+        setSaveState("saved");
+      } catch { setSaveState("error"); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [wheel]);
+
+  if (areas === null || wheel === null) {
     return <div style={{fontFamily:"'Work Sans',sans-serif"}} className="min-h-screen flex items-center justify-center bg-[#F2F1EC] text-[#6B6357]">Lädt …</div>;
   }
 
@@ -242,6 +332,7 @@ export default function Dashboard() {
     setAreas(prev => prev.filter(a => a.id !== id));
     if (activeArea === id) { setActiveArea(null); setTab("uebersicht"); }
   };
+  const setWheelScore = (key, value) => setWheel(prev => ({ ...prev, [key]: value }));
 
   const area = areas.find(a => a.id === activeArea);
 
@@ -268,7 +359,7 @@ export default function Dashboard() {
       </header>
 
       <nav className="px-6 max-w-4xl mx-auto flex gap-1 mb-6 border-b border-[#E4E0D6]">
-        {[["uebersicht","Übersicht"],["checkin","Check-in"]].map(([k,l]) => (
+        {[["uebersicht","Übersicht"],["checkin","Check-in"],["rad","Lebensrad"]].map(([k,l]) => (
           <button key={k} onClick={() => { setTab(k); }}
             className={`px-3 py-2 text-sm transition-colors ${tab===k ? "text-[#2B2A28] border-b-2 border-[#2B2A28] font-medium" : "text-[#9B9484] hover:text-[#6B6357]"}`}>
             {l}
@@ -358,6 +449,30 @@ export default function Dashboard() {
             {areas.every(a => !a.habits.length) && (
               <p className="text-sm text-[#6B6357]">Noch keine Gewohnheiten angelegt. Geh zu einem Lebensbereich und füge welche hinzu.</p>
             )}
+          </div>
+        )}
+
+        {tab === "rad" && (
+          <div>
+            <div className="flex items-center gap-2 text-[#6B6357] mono text-xs uppercase tracking-wider mb-1">
+              <Radar size={14} /> Lebensrad
+            </div>
+            <p className="text-sm text-[#6B6357] mb-6">Wie ausgeglichen fühlt sich dein Leben gerade an? Bewerte jeden Bereich von 0 bis 10.</p>
+            <div className="bg-white rounded-2xl border border-[#E4E0D6] p-6 mb-4">
+              <LifeWheel scores={wheel} />
+            </div>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {WHEEL_CATEGORIES.map(c => (
+                <div key={c.key} className="flex items-center gap-3 bg-white rounded-xl border border-[#E4E0D6] px-4 py-3">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: c.color }} />
+                  <span className="text-sm flex-1">{c.label}</span>
+                  <input type="range" min={0} max={10} step={1} value={wheel[c.key] ?? 5}
+                    onChange={e => setWheelScore(c.key, Number(e.target.value))}
+                    style={{ accentColor: c.color }} className="w-28" />
+                  <span className="mono text-xs text-[#6B6357] w-5 text-right">{wheel[c.key] ?? 5}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
